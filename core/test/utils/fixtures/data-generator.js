@@ -1,7 +1,9 @@
 var _             = require('lodash'),
-    uuid          = require('node-uuid'),
+    uuid          = require('uuid'),
+    moment        = require('moment'),
     globalUtils   = require('../../../server/utils'),
     DataGenerator = {};
+
 /*jshint quotmark:false*/
 // jscs:disable validateQuoteMarks, requireCamelCaseOrUpperCaseIdentifiers
 DataGenerator.Content = {
@@ -58,7 +60,8 @@ DataGenerator.Content = {
             title: "This is a scheduled post!!",
             slug: "scheduled-post",
             markdown: "<h1>Welcome to my invisible post!</h1>",
-            status: "scheduled"
+            status: "scheduled",
+            published_at: moment().add(2, 'days').toDate()
         }
     ],
 
@@ -88,24 +91,28 @@ DataGenerator.Content = {
     // Password = Sl1m3rson
     users: [
         {
+            // owner
             name: 'Joe Bloggs',
             slug: 'joe-bloggs',
             email: 'jbloggs@example.com',
             password: '$2a$10$.pZeeBE0gHXd0PTnbT/ph.GEKgd0Wd3q2pWna3ynTGBkPKnGIKZL6'
         },
         {
+            // editor
             name: 'Smith Wellingsworth',
             slug: 'smith-wellingsworth',
             email: 'swellingsworth@example.com',
             password: '$2a$10$.pZeeBE0gHXd0PTnbT/ph.GEKgd0Wd3q2pWna3ynTGBkPKnGIKZL6'
         },
         {
+            // author
             name: 'Jimothy Bogendath',
             slug: 'jimothy-bogendath',
             email: 'jbOgendAth@example.com',
             password: '$2a$10$.pZeeBE0gHXd0PTnbT/ph.GEKgd0Wd3q2pWna3ynTGBkPKnGIKZL6'
         },
         {
+            // administrator
             name: 'Slimer McEctoplasm',
             slug: 'slimer-mcectoplasm',
             email: 'smcectoplasm@example.com',
@@ -240,7 +247,8 @@ DataGenerator.Content = {
 
     subscribers: [
         {
-            email: 'subscriber1@test.com'
+            email: 'subscriber1@test.com',
+            post_id: 1
         },
         {
             email: 'subscriber2@test.com'
@@ -257,7 +265,8 @@ DataGenerator.forKnex = (function () {
         roles,
         users,
         roles_users,
-        clients;
+        clients,
+        trustedDomains;
 
     function createBasic(overrides) {
         var newObj = _.cloneDeep(overrides);
@@ -276,6 +285,7 @@ DataGenerator.forKnex = (function () {
 
         return _.defaults(newObj, {
             uuid: uuid.v4(),
+            title: 'title',
             status: 'published',
             html: overrides.markdown,
             language: 'en_US',
@@ -318,6 +328,19 @@ DataGenerator.forKnex = (function () {
             created_by: 1,
             created_at: new Date()
         });
+    }
+
+    function createClient(overrides) {
+        overrides = overrides || {};
+
+        var newObj = _.cloneDeep(overrides),
+            basics = createBasic(newObj);
+
+        return _.defaults(newObj, {
+            secret: 'not_available',
+            type: 'ua',
+            status: 'enabled'
+        }, basics);
     }
 
     function createGenericUser(uniqueInteger) {
@@ -405,7 +428,16 @@ DataGenerator.forKnex = (function () {
     ];
 
     clients = [
-        createBasic({name: 'Ghost Admin', slug: 'ghost-admin', secret: 'not_available', type: 'ua', status: 'enabled'})
+        createClient({name: 'Ghost Admin', slug: 'ghost-admin', type: 'ua'}),
+        createClient({name: 'Ghost Scheduler', slug: 'ghost-scheduler', type: 'web'})
+    ];
+
+    trustedDomains = [
+        {
+            uuid: '117084d0-d660-11e6-8b46-f7d235f120db',
+            client_id: 1,
+            trusted_domain: 'https://example.com'
+        }
     ];
 
     roles_users = [
@@ -440,6 +472,7 @@ DataGenerator.forKnex = (function () {
         createGenericPost: createGenericPost,
         createTag: createBasic,
         createUser: createUser,
+        createClient: createClient,
         createGenericUser: createGenericUser,
         createBasic: createBasic,
         createRole: createBasic,
@@ -451,6 +484,7 @@ DataGenerator.forKnex = (function () {
         createToken: createToken,
         createSubscriber: createBasic,
 
+        trustedDomains: trustedDomains,
         posts: posts,
         tags: tags,
         posts_tags: posts_tags,
