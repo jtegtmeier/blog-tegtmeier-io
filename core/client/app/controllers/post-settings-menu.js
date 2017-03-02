@@ -1,36 +1,30 @@
+import $ from 'jquery';
 import Ember from 'ember';
-import {parseDateString} from 'ghost/utils/date-formatting';
-import SettingsMenuMixin from 'ghost/mixins/settings-menu-controller';
-import boundOneWay from 'ghost/utils/bound-one-way';
-import isNumber from 'ghost/utils/isNumber';
+import Controller from 'ember-controller';
+import computed from 'ember-computed';
+import {guidFor} from 'ember-metal/utils';
+import injectService from 'ember-service/inject';
+import injectController from 'ember-controller/inject';
+import {htmlSafe} from 'ember-string';
+import observer from 'ember-metal/observer';
 
-const {
-    $,
-    ArrayProxy,
-    Controller,
-    Handlebars,
-    PromiseProxyMixin,
-    RSVP,
-    computed,
-    guidFor,
-    inject: {service, controller},
-    isArray,
-    isBlank,
-    observer,
-    run
-} = Ember;
+import {parseDateString} from 'ghost-admin/utils/date-formatting';
+import SettingsMenuMixin from 'ghost-admin/mixins/settings-menu-controller';
+import boundOneWay from 'ghost-admin/utils/bound-one-way';
+import isNumber from 'ghost-admin/utils/isNumber';
+
+const {ArrayProxy, Handlebars, PromiseProxyMixin} = Ember;
 
 export default Controller.extend(SettingsMenuMixin, {
-    debounceId: null,
-    lastPromise: null,
     selectedAuthor: null,
 
-    application: controller(),
-    config: service(),
-    ghostPaths: service(),
-    notifications: service(),
-    session: service(),
-    slugGenerator: service(),
+    application: injectController(),
+    config: injectService(),
+    ghostPaths: injectService(),
+    notifications: injectService(),
+    session: injectService(),
+    slugGenerator: injectService(),
+    timeZone: injectService(),
 
     initializeSelectedAuthor: observer('model', function () {
         return this.get('model.author').then((author) => {
@@ -57,33 +51,6 @@ export default Controller.extend(SettingsMenuMixin, {
     }),
 
     slugValue: boundOneWay('model.slug'),
-
-    // Requests slug from title
-    generateAndSetSlug(destination) {
-        let title = this.get('model.titleScratch');
-        let afterSave = this.get('lastPromise');
-        let promise;
-
-        // Only set an "untitled" slug once per post
-        if (title === '(Untitled)' && this.get('model.slug')) {
-            return;
-        }
-
-        promise = RSVP.resolve(afterSave).then(() => {
-            return this.get('slugGenerator').generateSlug('post', title).then((slug) => {
-                if (!isBlank(slug)) {
-                    this.set(destination, slug);
-                }
-            }).catch(() => {
-                // Nothing to do (would be nice to log this somewhere though),
-                // but a rejected promise needs to be handled here so that a resolved
-                // promise is returned.
-            });
-        });
-
-        this.set('lastPromise', promise);
-    },
-
     metaTitleScratch: boundOneWay('model.metaTitle'),
     metaDescriptionScratch: boundOneWay('model.metaDescription'),
 
@@ -95,7 +62,7 @@ export default Controller.extend(SettingsMenuMixin, {
         if (metaTitle.length > 70) {
             metaTitle = metaTitle.substring(0, 70).trim();
             metaTitle = Handlebars.Utils.escapeExpression(metaTitle);
-            metaTitle = Ember.String.htmlSafe(`${metaTitle}&hellip;`);
+            metaTitle = htmlSafe(`${metaTitle}&hellip;`);
         }
 
         return metaTitle;
@@ -128,7 +95,7 @@ export default Controller.extend(SettingsMenuMixin, {
             // Limit to 156 characters
             placeholder = placeholder.substring(0, 156).trim();
             placeholder = Handlebars.Utils.escapeExpression(placeholder);
-            placeholder = Ember.String.htmlSafe(`${placeholder}&hellip;`);
+            placeholder = htmlSafe(`${placeholder}&hellip;`);
         }
 
         return placeholder;
@@ -146,32 +113,11 @@ export default Controller.extend(SettingsMenuMixin, {
 
         if (seoURL.length > 70) {
             seoURL = seoURL.substring(0, 70).trim();
-            seoURL = Ember.String.htmlSafe(`${seoURL}&hellip;`);
+            seoURL = htmlSafe(`${seoURL}&hellip;`);
         }
 
         return seoURL;
     }),
-
-    // observe titleScratch, keeping the post's slug in sync
-    // with it until saved for the first time.
-    addTitleObserver: observer('model', function () {
-        if (this.get('model.isNew') || this.get('model.title') === '(Untitled)') {
-            this.addObserver('model.titleScratch', this, 'titleObserver');
-        }
-    }),
-
-    titleObserver() {
-        let title = this.get('model.title');
-        let debounceId;
-
-        // generate a slug if a post is new and doesn't have a title yet or
-        // if the title is still '(Untitled)' and the slug is unaltered.
-        if ((this.get('model.isNew') && !title) || title === '(Untitled)') {
-            debounceId = run.debounce(this, 'generateAndSetSlug', 'model.slug', 700);
-        }
-
-        this.set('debounceId', debounceId);
-    },
 
     // live-query of all tags for tag input autocomplete
     availableTags: computed(function () {
@@ -180,9 +126,11 @@ export default Controller.extend(SettingsMenuMixin, {
         });
     }),
 
-    showErrors(errors) {
-        errors = isArray(errors) ? errors : [errors];
-        this.get('notifications').showErrors(errors);
+    showError(error) {
+        // TODO: remove null check once ValidationEngine has been removed
+        if (error) {
+            this.get('notifications').showAPIError(error);
+        }
     },
 
     actions: {
@@ -199,8 +147,8 @@ export default Controller.extend(SettingsMenuMixin, {
                 return;
             }
 
-            this.get('model').save().catch((errors) => {
-                this.showErrors(errors);
+            this.get('model').save().catch((error) => {
+                this.showError(error);
                 this.get('model').rollbackAttributes();
             });
         },
@@ -214,8 +162,8 @@ export default Controller.extend(SettingsMenuMixin, {
                 return;
             }
 
-            this.get('model').save(this.get('saveOptions')).catch((errors) => {
-                this.showErrors(errors);
+            this.get('model').save(this.get('saveOptions')).catch((error) => {
+                this.showError(error);
                 this.get('model').rollbackAttributes();
             });
         },
@@ -277,8 +225,8 @@ export default Controller.extend(SettingsMenuMixin, {
                 }
 
                 return this.get('model').save();
-            }).catch((errors) => {
-                this.showErrors(errors);
+            }).catch((error) => {
+                this.showError(error);
                 this.get('model').rollbackAttributes();
             });
         },
@@ -288,97 +236,132 @@ export default Controller.extend(SettingsMenuMixin, {
          * Action sent by post settings menu view.
          * (#1351)
          */
-        setPublishedAt(userInput) {
+        setPublishedAtUTC(userInput) {
             if (!userInput) {
-                // Clear out the publishedAt field for a draft
+                // Clear out the publishedAtUTC field for a draft
                 if (this.get('model.isDraft')) {
-                    this.set('model.publishedAt', null);
+                    this.set('model.publishedAtUTC', null);
+                }
+                return;
+            }
+
+            // The user inputs a date which he expects to be in his timezone. Therefore, from now on
+            // we have to work with the timezone offset which we get from the timeZone Service.
+            this.get('timeZone.blogTimezone').then((blogTimezone) => {
+                let newPublishedAt = parseDateString(userInput, blogTimezone);
+                let publishedAtUTC = moment.utc(this.get('model.publishedAtUTC'));
+                let errMessage = '';
+                let newPublishedAtUTC;
+
+                // Clear previous errors
+                this.get('model.errors').remove('post-setting-date');
+
+                // Validate new Published date
+                if (!newPublishedAt.isValid()) {
+                    errMessage = 'Published Date must be a valid date with format: ' +
+                        'DD MMM YY @ HH:mm (e.g. 6 Dec 14 @ 15:00)';
                 }
 
-                return;
-            }
+                // Date is a valid date, so now make it UTC
+                newPublishedAtUTC = moment.utc(newPublishedAt);
 
-            let newPublishedAt = parseDateString(userInput);
-            let publishedAt = moment(this.get('model.publishedAt'));
-            let errMessage = '';
+                if (newPublishedAtUTC.diff(moment.utc(new Date()), 'hours', true) > 0) {
 
-            // Clear previous errors
-            this.get('model.errors').remove('post-setting-date');
+                    // We have to check that the time from now is not shorter than 2 minutes,
+                    // otherwise we'll have issues with the serverside scheduling procedure
+                    if (newPublishedAtUTC.diff(moment.utc(new Date()), 'minutes', true) < 2) {
+                        errMessage = 'Must be at least 2 minutes from now.';
+                    } else {
+                        // in case the post is already published and the user sets the date
+                        // afterwards to a future time, we stop here, and he has to unpublish
+                        // his post first
+                        if (this.get('model.isPublished')) {
+                            errMessage = 'Your post is already published.';
+                            // this is the indicator for the different save button layout
+                            this.set('timeScheduled', false);
+                        }
+                        // everything fine, we can start the schedule workflow and change
+                        // the save buttons according to it
+                        this.set('timeScheduled', true);
+                    }
+                    // if the post is already scheduled and the user changes the date back into the
+                    // past, we'll set the status of the post back to draft, so he can start all over
+                    // again
+                } else if (this.get('model.isScheduled')) {
+                    this.set('model.status', 'draft');
+                }
 
-            // Validate new Published date
-            if (!newPublishedAt.isValid()) {
-                errMessage = 'Published Date must be a valid date with format: ' +
-                    'DD MMM YY @ HH:mm (e.g. 6 Dec 14 @ 15:00)';
-            } else if (newPublishedAt.diff(new Date(), 'h') > 0) {
-                errMessage = 'Published Date cannot currently be in the future.';
-            }
+                // If errors, notify and exit.
+                if (errMessage) {
+                    this.get('model.errors').add('post-setting-date', errMessage);
+                    return;
+                }
 
-            // If errors, notify and exit.
-            if (errMessage) {
-                this.get('model.errors').add('post-setting-date', errMessage);
-                return;
-            }
+                // Do nothing if the user didn't actually change the date
+                if (publishedAtUTC && publishedAtUTC.isSame(newPublishedAtUTC)) {
+                    return;
+                }
 
-            // Validation complete, update the view
-            this.set('model.publishedAt', newPublishedAt);
+                // Validation complete
+                this.set('model.publishedAtUTC', newPublishedAtUTC);
 
-            // Don't save the date if the user didn't actually changed the date
-            if (publishedAt && publishedAt.isSame(newPublishedAt)) {
-                return;
-            }
+                // If this is a new post.  Don't save the model.  Defer the save
+                // to the user pressing the save button
+                if (this.get('model.isNew')) {
+                    return;
+                }
 
-            // If this is a new post.  Don't save the model.  Defer the save
-            // to the user pressing the save button
-            if (this.get('model.isNew')) {
-                return;
-            }
-
-            this.get('model').save().catch((errors) => {
-                this.showErrors(errors);
-                this.get('model').rollbackAttributes();
+                this.get('model').save().catch((error) => {
+                    this.showError(error);
+                    this.get('model').rollbackAttributes();
+                });
             });
         },
 
         setMetaTitle(metaTitle) {
-            let property = 'metaTitle';
+            // Grab the model and current stored meta title
             let model = this.get('model');
-            let currentTitle = model.get(property) || '';
+            let currentTitle = model.get('metaTitle');
 
-            // Only update if the title has changed
+            // If the title entered matches the stored meta title, do nothing
             if (currentTitle === metaTitle) {
                 return;
             }
 
-            model.set(property, metaTitle);
+            // If the title entered is different, set it as the new meta title
+            model.set('metaTitle', metaTitle);
 
-            // If this is a new post.  Don't save the model.  Defer the save
-            // to the user pressing the save button
-            if (model.get('isNew')) {
-                return;
-            }
+            // Make sure the meta title is valid and if so, save it into the model
+            return model.validate({property: 'metaTitle'}).then(() => {
+                if (model.get('isNew')) {
+                    return;
+                }
 
-            model.save();
+                return model.save();
+            });
         },
 
         setMetaDescription(metaDescription) {
-            let property = 'metaDescription';
+            // Grab the model and current stored meta description
             let model = this.get('model');
-            let currentDescription = model.get(property) || '';
+            let currentDescription = model.get('metaDescription');
 
-            // Only update if the description has changed
+            // If the title entered matches the stored meta title, do nothing
             if (currentDescription === metaDescription) {
                 return;
             }
 
-            model.set(property, metaDescription);
+            // If the title entered is different, set it as the new meta title
+            model.set('metaDescription', metaDescription);
 
-            // If this is a new post.  Don't save the model.  Defer the save
-            // to the user pressing the save button
-            if (model.get('isNew')) {
-                return;
-            }
+            // Make sure the meta title is valid and if so, save it into the model
+            return model.validate({property: 'metaDescription'}).then(() => {
+                if (model.get('isNew')) {
+                    return;
+                }
 
-            model.save();
+                return model.save();
+            });
         },
 
         setCoverImage(image) {
@@ -388,8 +371,8 @@ export default Controller.extend(SettingsMenuMixin, {
                 return;
             }
 
-            this.get('model').save().catch((errors) => {
-                this.showErrors(errors);
+            this.get('model').save().catch((error) => {
+                this.showError(error);
                 this.get('model').rollbackAttributes();
             });
         },
@@ -401,14 +384,14 @@ export default Controller.extend(SettingsMenuMixin, {
                 return;
             }
 
-            this.get('model').save().catch((errors) => {
-                this.showErrors(errors);
+            this.get('model').save().catch((error) => {
+                this.showError(error);
                 this.get('model').rollbackAttributes();
             });
         },
 
         resetPubDate() {
-            this.set('publishedAtValue', '');
+            this.set('publishedAtUTCValue', '');
         },
 
         closeNavMenu() {
@@ -431,8 +414,8 @@ export default Controller.extend(SettingsMenuMixin, {
                 return;
             }
 
-            model.save().catch((errors) => {
-                this.showErrors(errors);
+            model.save().catch((error) => {
+                this.showError(error);
                 this.set('selectedAuthor', author);
                 model.rollbackAttributes();
             });

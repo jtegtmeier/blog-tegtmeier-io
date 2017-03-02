@@ -6,12 +6,10 @@ import {
     afterEach
 } from 'mocha';
 import { expect } from 'chai';
-import Ember from 'ember';
+import run from 'ember-runloop';
 import startApp from '../../helpers/start-app';
 import destroyApp from '../../helpers/destroy-app';
-import { invalidateSession, authenticateSession } from 'ghost/tests/helpers/ember-simple-auth';
-
-const {run} = Ember;
+import { invalidateSession, authenticateSession } from 'ghost-admin/tests/helpers/ember-simple-auth';
 
 describe('Acceptance: Settings - Apps', function () {
     let application;
@@ -83,6 +81,22 @@ describe('Acceptance: Settings - Apps', function () {
                 expect(currentURL(), 'currentURL').to.equal('/settings/apps/slack');
             });
 
+        });
+
+        it('it redirects to AMP when clicking on the grid', function () {
+            visit('/settings/apps');
+
+            andThen(() => {
+                // has correct url
+                expect(currentURL(), 'currentURL').to.equal('/settings/apps');
+            });
+
+            click('#amp-link');
+
+            andThen(() => {
+                // has correct url
+                expect(currentURL(), 'currentURL').to.equal('/settings/apps/amp');
+            });
         });
 
     });

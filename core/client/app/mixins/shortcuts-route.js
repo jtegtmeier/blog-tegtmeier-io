@@ -1,7 +1,5 @@
-import Ember from 'ember';
-import ShortcutsMixin from 'ghost/mixins/shortcuts';
-
-const {Mixin} = Ember;
+import Mixin from 'ember-metal/mixin';
+import ShortcutsMixin from 'ghost-admin/mixins/shortcuts';
 
 /**
  * Only routes can implement shortcuts.
@@ -15,8 +13,7 @@ const {Mixin} = Ember;
  *
  * ```javascript
  * shortcuts: {
- *     'ctrl+s, command+s': 'save',
- *     'ctrl+alt+z': 'toggleZenMode'
+ *     'ctrl+s, command+s': 'save'
  * }
  * ```
  * For more complex actions, shortcuts can instead have their value

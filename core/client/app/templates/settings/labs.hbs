@@ -19,7 +19,7 @@
                 <div class="form-group">
                     <label>Import</label>
                     {{partial "import-errors"}}
-                    {{gh-file-upload id="importfile" classNames="flex" uploadButtonText=uploadButtonText onUpload="onUpload"}}
+                    {{gh-file-upload id="importfile" classNames="flex" uploadButtonText=uploadButtonText onUpload="onUpload" acceptEncoding=importMimeType}}
                     <p>Import from another Ghost installation. If you import a user, this will replace the current user & log you out.</p>
                 </div>
             </fieldset>
@@ -51,7 +51,10 @@
                         Public API - For full instructions, read the <a href="http://support.ghost.org/public-api-beta/">developer guide</a>.
                     {{/gh-feature-flag}}
                     {{#gh-feature-flag "subscribers"}}
-                        Subscribers - Allow visitors to subscribe to e-mail updates of your new posts
+                        Subscribers - Collect email addresses from your readers, more info in <a href="http://support.ghost.org/subscribers-beta/">the docs</a>
+                    {{/gh-feature-flag}}
+                    {{#gh-feature-flag "internalTags"}}
+                        Internal Tags - tags which don't show up in your theme, more info in <a href="http://support.ghost.org/internal-tags-beta/">the docs</a>.
                     {{/gh-feature-flag}}
                 </div>
             </fieldset>

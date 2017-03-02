@@ -4,8 +4,8 @@ import {
     describe,
     it
 } from 'mocha';
-import validator from 'ghost/validators/slack-integration';
-import SlackObject from 'ghost/models/slack-integration';
+import validator from 'ghost-admin/validators/slack-integration';
+import SlackObject from 'ghost-admin/models/slack-integration';
 
 const testInvalidUrl = function (url) {
     let slackObject = SlackObject.create({url});
@@ -13,7 +13,7 @@ const testInvalidUrl = function (url) {
     validator.check(slackObject, 'url');
 
     expect(validator.get('passed'), `"${url}" passed`).to.be.false;
-    expect(slackObject.get('errors').errorsFor('url')).to.deep.equal([{
+    expect(slackObject.get('errors').errorsFor('url').toArray()).to.deep.equal([{
         attribute: 'url',
         message: 'The URL must be in a format like https://hooks.slack.com/services/<your personal key>'
     }]);

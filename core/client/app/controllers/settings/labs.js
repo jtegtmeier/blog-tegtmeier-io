@@ -1,11 +1,12 @@
-import Ember from 'ember';
+import $ from 'jquery';
+import RSVP from 'rsvp';
+import Controller from 'ember-controller';
+import injectService from 'ember-service/inject';
+import {isBlank} from 'ember-utils';
+import {isEmberArray} from 'ember-array/utils';
+import {UnsupportedMediaTypeError, isUnsupportedMediaTypeError} from 'ghost-admin/services/ajax';
 
-const {
-    $,
-    Controller,
-    inject: {service},
-    isArray
-} = Ember;
+const {Promise} = RSVP;
 
 export default Controller.extend({
     uploadButtonText: 'Import',
@@ -13,10 +14,53 @@ export default Controller.extend({
     submitting: false,
     showDeleteAllModal: false,
 
-    ghostPaths: service(),
-    notifications: service(),
-    session: service(),
-    ajax: service(),
+    importMimeType: ['application/json', 'application/zip', 'application/x-zip-compressed'],
+
+    ghostPaths: injectService(),
+    notifications: injectService(),
+    session: injectService(),
+    ajax: injectService(),
+
+    // TODO: convert to ember-concurrency task
+    _validate(file) {
+        // Windows doesn't have mime-types for json files by default, so we
+        // need to have some additional checking
+        if (file.type === '') {
+            // First check file extension so we can early return
+            let [, extension] = (/(?:\.([^.]+))?$/).exec(file.name);
+
+            if (!extension || extension.toLowerCase() !== 'json') {
+                return RSVP.reject(new UnsupportedMediaTypeError());
+            }
+
+            return new Promise((resolve, reject) => {
+                // Extension is correct, so check the contents of the file
+                let reader = new FileReader();
+
+                reader.onload = function () {
+                    let {result} = reader;
+
+                    try {
+                        JSON.parse(result);
+
+                        return resolve();
+                    } catch (e) {
+                        return reject(new UnsupportedMediaTypeError());
+                    }
+                };
+
+                reader.readAsText(file);
+            });
+        }
+
+        let accept = this.get('importMimeType');
+
+        if (!isBlank(accept) && file && accept.indexOf(file.type) === -1) {
+            return RSVP.reject(new UnsupportedMediaTypeError());
+        }
+
+        return RSVP.resolve();
+    },
 
     actions: {
         onUpload(file) {
@@ -28,14 +72,16 @@ export default Controller.extend({
             this.set('uploadButtonText', 'Importing');
             this.set('importErrors', '');
 
-            formData.append('importfile', file);
+            return this._validate(file).then(() => {
+                formData.append('importfile', file);
 
-            this.get('ajax').post(dbUrl, {
-                data: formData,
-                dataType: 'json',
-                cache: false,
-                contentType: false,
-                processData: false
+                return this.get('ajax').post(dbUrl, {
+                    data: formData,
+                    dataType: 'json',
+                    cache: false,
+                    contentType: false,
+                    processData: false
+                });
             }).then(() => {
                 // Clear the store, so that all the new data gets fetched correctly.
                 this.store.unloadAll();
@@ -44,7 +90,12 @@ export default Controller.extend({
                 // TODO: keep as notification, add link to view content
                 notifications.showNotification('Import successful.', {key: 'import.upload.success'});
             }).catch((response) => {
-                if (response && response.errors && isArray(response.errors)) {
+                if (isUnsupportedMediaTypeError(response)) {
+                    this.set('importErrors', [response]);
+                    return;
+                }
+
+                if (response && response.errors && isEmberArray(response.errors)) {
                     this.set('importErrors', response.errors);
                 }
 

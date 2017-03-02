@@ -116,8 +116,9 @@ a.user-list-item {
     font-size: 12px;
 }
 
-.user-list-item-aside .user-list-action:not(:first-of-type) {
-    margin-left: 20px;
+.user-list-item-aside .user-list-action {
+    float: left;
+    margin-right: 20px;
 }
 
 .user-list-item-aside .role-label {
@@ -145,7 +146,6 @@ a.user-list-item {
     background: #eee;
     color: rgba(0, 0, 0, 0.5);
     text-transform: uppercase;
-    letter-spacing: 0.1em;
     font-size: 9px;
     line-height: 1;
     font-weight: 400;

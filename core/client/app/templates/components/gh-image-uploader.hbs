@@ -15,9 +15,9 @@
     {{#if showUploadForm}}
         {{!-- file selection/drag-n-drop  --}}
         <div class="upload-form">
-            {{#x-file-input multiple=false alt=text action=(action 'fileSelected') accept="image/gif,image/jpg,image/jpeg,image/png,image/svg+xml"}}
-                <div class="description">{{text}}</div>
-            {{/x-file-input}}
+            {{#gh-file-input multiple=false alt=description action=(action 'fileSelected') accept=accept}}
+                <div class="description">{{description}}</div>
+            {{/gh-file-input}}
         </div>
 
         <a class="image-url" {{action 'switchForm' 'url-input'}}>
@@ -26,11 +26,11 @@
     {{else}}
         {{!-- URL input --}}
         <form class="url-form">
-            {{one-way-input class="url gh-input" placeholder="http://" value=url update=(action "onInput") onenter=(action "saveUrl")}}
+            {{gh-input url class="url" placeholder="http://" update=(action "onInput") onenter=(action "saveUrl")}}
             {{#if saveButton}}
                 <button class="btn btn-blue gh-input" {{action 'saveUrl'}}>Save</button>
             {{else}}
-                <div class="description">{{text}}</div>
+                <div class="description">{{description}}</div>
             {{/if}}
         </form>
 

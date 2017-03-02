@@ -1,7 +1,7 @@
-import Ember from 'ember';
+import run from 'ember-runloop';
+import {isBlank} from 'ember-utils';
+import Component from 'ember-component';
 import {invokeAction} from 'ember-invoke-action';
-
-const {run, isBlank, Component} = Ember;
 
 export default Component.extend({
     open() {
@@ -35,7 +35,9 @@ export default Component.extend({
 
         handleKeydown(e) {
             let select = this.get('select');
-            if (!select.isOpen) {
+
+            // TODO: remove keycode check once EPS is updated to 1.0
+            if (!select.isOpen || e.keyCode === 32) {
                 e.stopPropagation();
             }
         }

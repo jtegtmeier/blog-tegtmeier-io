@@ -6,12 +6,12 @@ import {
   afterEach
 } from 'mocha';
 import { expect } from 'chai';
-import Ember from 'ember';
 import startApp from '../helpers/start-app';
 import destroyApp from '../helpers/destroy-app';
-import { invalidateSession, authenticateSession } from 'ghost/tests/helpers/ember-simple-auth';
-import { errorOverride, errorReset } from 'ghost/tests/helpers/adapter-error';
+import { invalidateSession, authenticateSession } from 'ghost-admin/tests/helpers/ember-simple-auth';
+import { errorOverride, errorReset } from 'ghost-admin/tests/helpers/adapter-error';
 import Mirage from 'ember-cli-mirage';
+import $ from 'jquery';
 
 describe('Acceptance: Team', function () {
     let application;
@@ -62,9 +62,11 @@ describe('Acceptance: Team', function () {
     });
 
     describe('when logged in', function () {
+        let admin;
+
         beforeEach(function () {
-            let role = server.create('role', {name: 'Admininstrator'});
-            let user = server.create('user', {roles: [role]});
+            let role = server.create('role', {name: 'Administrator'});
+            admin = server.create('user', {roles: [role]});
 
             server.loadFixtures();
 
@@ -98,7 +100,7 @@ describe('Acceptance: Team', function () {
                     expect(document.title, 'title after clicking user').to.equal('Team - User - Test Blog');
 
                     // view title should exist and be linkable and active
-                    expect(find('.view-title a[href="/team"]').hasClass('active'), 'has linkable url back to team main page')
+                    expect(find('.view-title a[href="/ghost/team"]').hasClass('active'), 'has linkable url back to team main page')
                         .to.be.true;
                 });
 
@@ -235,11 +237,76 @@ describe('Acceptance: Team', function () {
             });
         });
 
+        it('can delete users', function () {
+            /* jscs:disable requireCamelCaseOrUpperCaseIdentifiers */
+            let user1 = server.create('user');
+            let user2 = server.create('user');
+            let post1 = server.create('post', {author_id: user2.id});
+            /* jscs:disable requireCamelCaseOrUpperCaseIdentifiers */
+
+            visit('/team');
+            click(`a.user-list-item:contains("${user1.name}")`);
+
+            // user deletion displays modal
+            click('button.delete');
+            andThen(() => {
+                expect(
+                    find('.fullscreen-modal .modal-content:contains("delete this user")').length,
+                    'user deletion modal displayed after button click'
+                ).to.equal(1);
+
+                // user has no posts so no warning about post deletion
+                expect(
+                    find('.fullscreen-modal .modal-content:contains("is the author of")').length,
+                    'deleting user with no posts has no post count'
+                ).to.equal(0);
+            });
+
+            // cancelling user deletion closes modal
+            click('.fullscreen-modal button:contains("Cancel")');
+            andThen(() => {
+                expect(
+                    find('.fullscreen-modal').length === 0,
+                    'delete user modal is closed when cancelling'
+                ).to.be.true;
+            });
+
+            // deleting a user with posts
+            visit('/team');
+            click(`a.user-list-item:contains("${user2.name}")`);
+
+            click('button.delete');
+            andThen(() => {
+                // user has  posts so should warn about post deletion
+                expect(
+                    find('.fullscreen-modal .modal-content:contains("is the author of 1 post")').length,
+                    'deleting user with posts has post count'
+                ).to.equal(1);
+            });
+
+            click('.fullscreen-modal button:contains("Delete")');
+            andThen(() => {
+                // redirected to team page
+                expect(currentURL()).to.equal('/team');
+
+                // deleted user is not in list
+                expect(
+                    find(`.user-list-item .name:contains("${user2.name}")`).length,
+                    'deleted user is not in user list after deletion'
+                ).to.equal(0);
+            });
+        });
+
         describe('existing user', function () {
             let user;
 
             beforeEach(function () {
-                server.create('user', {slug: 'test-1', name: 'Test User'});
+                user = server.create('user', {
+                    slug: 'test-1',
+                    name: 'Test User',
+                    facebook: 'test',
+                    twitter: '@test'
+                });
 
                 server.loadFixtures();
             });
@@ -302,7 +369,7 @@ describe('Acceptance: Team', function () {
                 triggerEvent('#user-location', 'blur');
 
                 andThen(() => {
-                    expect(find('.user-details-bottom .form-group:nth-of-type(3)').hasClass('error'), 'location input should be in error state').to.be.true;
+                    expect(find('#user-location').closest('.form-group').hasClass('error'), 'location input should be in error state').to.be.true;
                 });
 
                 fillIn('#user-location', '');
@@ -310,7 +377,25 @@ describe('Acceptance: Team', function () {
                 triggerEvent('#user-website', 'blur');
 
                 andThen(() => {
-                    expect(find('.user-details-bottom .form-group:nth-of-type(4)').hasClass('error'), 'website input should be in error state').to.be.true;
+                    expect(find('#user-website').closest('.form-group').hasClass('error'), 'website input should be in error state').to.be.true;
+                });
+
+                // Testing Facebook input
+
+                andThen(() => {
+                    // displays initial value
+                    expect(find('#user-facebook').val(), 'initial facebook value')
+                        .to.equal('https://www.facebook.com/test');
+                });
+
+                triggerEvent('#user-facebook', 'focus');
+                triggerEvent('#user-facebook', 'blur');
+
+                andThen(() => {
+                    // regression test: we still have a value after the input is
+                    // focused and then blurred without any changes
+                    expect(find('#user-facebook').val(), 'facebook value after blur with no change')
+                        .to.equal('https://www.facebook.com/test');
                 });
 
                 fillIn('#user-facebook', '');
@@ -318,33 +403,78 @@ describe('Acceptance: Team', function () {
                 triggerEvent('#user-facebook', 'blur');
 
                 andThen(() => {
-                    expect(find('.user-details-bottom .form-group:nth-of-type(5)').hasClass('error'), 'facebook input should be in error state').to.be.true;
+                    expect(find('#user-facebook').closest('.form-group').hasClass('error'), 'facebook input should be in error state').to.be.true;
                 });
 
                 fillIn('#user-facebook', '');
-                fillIn('#user-facebook', 'name');
+                fillIn('#user-facebook', 'pages/)(*&%^%)');
                 triggerEvent('#user-facebook', 'blur');
 
                 andThen(() => {
-                    expect(find('#user-facebook').val()).to.be.equal('https://www.facebook.com/name');
-                    expect(find('.user-details-bottom .form-group:nth-of-type(5)').hasClass('error'), 'facebook input should be in error state').to.be.false;
+                    expect(find('#user-facebook').val()).to.be.equal('https://www.facebook.com/pages/)(*&%^%)');
+                    expect(find('#user-facebook').closest('.form-group').hasClass('error'), 'facebook input should be in error state').to.be.false;
                 });
 
                 fillIn('#user-facebook', '');
-                fillIn('#user-facebook', 'http://twitter.com/user');
+                fillIn('#user-facebook', 'testing');
                 triggerEvent('#user-facebook', 'blur');
 
                 andThen(() => {
-                    expect(find('.user-details-bottom .form-group:nth-of-type(5)').hasClass('error'), 'facebook input should be in error state').to.be.true;
+                    expect(find('#user-facebook').val()).to.be.equal('https://www.facebook.com/testing');
+                    expect(find('#user-facebook').closest('.form-group').hasClass('error'), 'facebook input should be in error state').to.be.false;
                 });
 
                 fillIn('#user-facebook', '');
-                fillIn('#user-facebook', 'facebook.com/user');
+                fillIn('#user-facebook', 'somewebsite.com/pages/some-facebook-page/857469375913?ref=ts');
                 triggerEvent('#user-facebook', 'blur');
 
                 andThen(() => {
-                    expect(find('#user-facebook').val()).to.be.equal('https://www.facebook.com/user');
-                    expect(find('.user-details-bottom .form-group:nth-of-type(5)').hasClass('error'), 'facebook input should be in error state').to.be.false;
+                    expect(find('#user-facebook').val()).to.be.equal('https://www.facebook.com/pages/some-facebook-page/857469375913?ref=ts');
+                    expect(find('#user-facebook').closest('.form-group').hasClass('error'), 'facebook input should be in error state').to.be.false;
+                });
+
+                fillIn('#user-facebook', '');
+                fillIn('#user-facebook', 'test');
+                triggerEvent('#user-facebook', 'blur');
+
+                andThen(() => {
+                    expect(find('#user-facebook').closest('.form-group').hasClass('error'), 'facebook input should be in error state').to.be.true;
+                });
+
+                fillIn('#user-facebook', '');
+                fillIn('#user-facebook', 'http://twitter.com/testuser');
+                triggerEvent('#user-facebook', 'blur');
+
+                andThen(() => {
+                    expect(find('#user-facebook').val()).to.be.equal('https://www.facebook.com/testuser');
+                    expect(find('#user-facebook').closest('.form-group').hasClass('error'), 'facebook input should be in error state').to.be.false;
+                });
+
+                fillIn('#user-facebook', '');
+                fillIn('#user-facebook', 'facebook.com/testing');
+                triggerEvent('#user-facebook', 'blur');
+
+                andThen(() => {
+                    expect(find('#user-facebook').val()).to.be.equal('https://www.facebook.com/testing');
+                    expect(find('#user-facebook').closest('.form-group').hasClass('error'), 'facebook input should be in error state').to.be.false;
+                });
+
+                // Testing Twitter input
+
+                andThen(() => {
+                    // loads fixtures and performs transform
+                    expect(find('#user-twitter').val(), 'initial twitter value')
+                        .to.equal('https://twitter.com/test');
+                });
+
+                triggerEvent('#user-twitter', 'focus');
+                triggerEvent('#user-twitter', 'blur');
+
+                andThen(() => {
+                    // regression test: we still have a value after the input is
+                    // focused and then blurred without any changes
+                    expect(find('#user-twitter').val(), 'twitter value after blur with no change')
+                        .to.equal('https://twitter.com/test');
                 });
 
                 fillIn('#user-twitter', '');
@@ -352,7 +482,7 @@ describe('Acceptance: Team', function () {
                 triggerEvent('#user-twitter', 'blur');
 
                 andThen(() => {
-                    expect(find('.user-details-bottom .form-group:nth-of-type(6)').hasClass('error'), 'twitter input should be in error state').to.be.true;
+                    expect(find('#user-twitter').closest('.form-group').hasClass('error'), 'twitter input should be in error state').to.be.true;
                 });
 
                 fillIn('#user-twitter', '');
@@ -361,7 +491,7 @@ describe('Acceptance: Team', function () {
 
                 andThen(() => {
                     expect(find('#user-twitter').val()).to.be.equal('https://twitter.com/name');
-                    expect(find('.user-details-bottom .form-group:nth-of-type(6)').hasClass('error'), 'twitter input should be in error state').to.be.false;
+                    expect(find('#user-twitter').closest('.form-group').hasClass('error'), 'twitter input should be in error state').to.be.false;
                 });
 
                 fillIn('#user-twitter', '');
@@ -369,7 +499,8 @@ describe('Acceptance: Team', function () {
                 triggerEvent('#user-twitter', 'blur');
 
                 andThen(() => {
-                    expect(find('.user-details-bottom .form-group:nth-of-type(6)').hasClass('error'), 'twitter input should be in error state').to.be.true;
+                    expect(find('#user-twitter').val()).to.be.equal('https://twitter.com/user');
+                    expect(find('#user-twitter').closest('.form-group').hasClass('error'), 'twitter input should be in error state').to.be.false;
                 });
 
                 fillIn('#user-twitter', '');
@@ -378,7 +509,7 @@ describe('Acceptance: Team', function () {
 
                 andThen(() => {
                     expect(find('#user-twitter').val()).to.be.equal('https://twitter.com/user');
-                    expect(find('.user-details-bottom .form-group:nth-of-type(6)').hasClass('error'), 'twitter input should be in error state').to.be.false;
+                    expect(find('#user-twitter').closest('.form-group').hasClass('error'), 'twitter input should be in error state').to.be.false;
                 });
 
                 fillIn('#user-website', '');
@@ -386,12 +517,139 @@ describe('Acceptance: Team', function () {
                 triggerEvent('#user-bio', 'blur');
 
                 andThen(() => {
-                    expect(find('.user-details-bottom .form-group:nth-of-type(7)').hasClass('error'), 'bio input should be in error state').to.be.true;
+                    expect(find('#user-bio').closest('.form-group').hasClass('error'), 'bio input should be in error state').to.be.true;
+                });
+
+                // password reset ------
+
+                // button triggers validation
+                click('.button-change-password');
+
+                andThen(() => {
+                    expect(
+                        find('#user-password-new').closest('.form-group').hasClass('error'),
+                        'new password has error class when blank'
+                    ).to.be.true;
+
+                    expect(
+                        find('#user-password-new').siblings('.response').text(),
+                        'new password error when blank'
+                    ).to.match(/can't be blank/);
+                });
+
+                // typing in inputs clears validation
+                fillIn('#user-password-new', 'password');
+                triggerEvent('#user-password-new', 'input');
+
+                andThen(() => {
+                    expect(
+                        find('#user-password-new').closest('.form-group').hasClass('error'),
+                        'password validation is visible after typing'
+                    ).to.be.false;
+                });
+
+                // enter key triggers action
+                keyEvent('#user-password-new', 'keyup', 13);
+
+                andThen(() => {
+                    expect(
+                        find('#user-new-password-verification').closest('.form-group').hasClass('error'),
+                        'confirm password has error class when it doesn\'t match'
+                    ).to.be.true;
+
+                    expect(
+                        find('#user-new-password-verification').siblings('.response').text(),
+                        'confirm password error when it doesn\'t match'
+                    ).to.match(/do not match/);
+                });
+
+                // submits with correct details
+                fillIn('#user-new-password-verification', 'password');
+                click('.button-change-password');
+
+                andThen(() => {
+                    // hits the endpoint
+                    let [lastRequest] = server.pretender.handledRequests.slice(-1);
+                    let params = $.deparam(lastRequest.requestBody);
+
+                    expect(lastRequest.url, 'password request URL')
+                        .to.match(/\/users\/password/);
+
+                    /* jscs:disable requireCamelCaseOrUpperCaseIdentifiers */
+                    expect(params.password[0].user_id).to.equal(user.id.toString());
+                    expect(params.password[0].newPassword).to.equal('password');
+                    expect(params.password[0].ne2Password).to.equal('password');
+                    /* jscs:enable requireCamelCaseOrUpperCaseIdentifiers */
+
+                    // clears the fields
+                    expect(
+                        find('#user-password-new').val(),
+                        'password field after submit'
+                    ).to.be.blank;
+
+                    expect(
+                        find('#user-new-password-verification').val(),
+                        'password verification field after submit'
+                    ).to.be.blank;
+
+                    // displays a notification
+                    expect(
+                        find('.gh-notifications .gh-notification').length,
+                        'password saved notification is displayed'
+                    ).to.equal(1);
                 });
             });
         });
 
-        it('redirects to 404 when tag does not exist', function () {
+        describe('own user', function () {
+            beforeEach(function () {
+                server.loadFixtures();
+            });
+
+            it('requires current password when changing password', function () {
+                visit(`/team/${admin.slug}`);
+
+                // test the "old password" field is validated
+                click('.button-change-password');
+
+                andThen(() => {
+                    // old password has error
+                    expect(
+                        find('#user-password-old').closest('.form-group').hasClass('error'),
+                        'old password has error class when blank'
+                    ).to.be.true;
+
+                    expect(
+                        find('#user-password-old').siblings('.response').text(),
+                        'old password error when blank'
+                    ).to.match(/is required/);
+
+                    // new password has error
+                    expect(
+                        find('#user-password-new').closest('.form-group').hasClass('error'),
+                        'new password has error class when blank'
+                    ).to.be.true;
+
+                    expect(
+                        find('#user-password-new').siblings('.response').text(),
+                        'new password error when blank'
+                    ).to.match(/can't be blank/);
+                });
+
+                // validation is cleared when typing
+                fillIn('#user-password-old', 'password');
+                triggerEvent('#user-password-old', 'input');
+
+                andThen(() => {
+                    expect(
+                        find('#user-password-old').closest('.form-group').hasClass('error'),
+                        'old password validation is in error state after typing'
+                    ).to.be.false;
+                });
+            });
+        });
+
+        it('redirects to 404 when user does not exist', function () {
             server.get('/users/slug/unknown/', function () {
                 return new Mirage.Response(404, {'Content-Type': 'application/json'}, {errors: [{message: 'User not found.', errorType: 'NotFoundError'}]});
             });

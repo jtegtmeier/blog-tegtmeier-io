@@ -1,41 +1,55 @@
 /*global device*/
-import Ember from 'ember';
+import computed from 'ember-computed';
+import GhostInput from 'ghost-admin/components/gh-input';
 
-const {TextField, computed} = Ember;
+/**
+ * This doesn't override the OneWayInput component because
+ * we need finer control. It borrows
+ * parts from both the OneWayInput component and Ember's default
+ * input component
+ */
+const TrimFocusInputComponent = GhostInput.extend({
 
-export default TextField.extend({
-    focus: true,
-    classNames: 'gh-input',
+    shouldFocus: true,
+
     attributeBindings: ['autofocus'],
 
     autofocus: computed(function () {
-        if (this.get('focus')) {
+        if (this.get('shouldFocus')) {
             return (device.ios()) ? false : 'autofocus';
         }
 
         return false;
     }),
 
-    _focusField() {
-        // This fix is required until Mobile Safari has reliable
-        // autofocus, select() or focus() support
-        if (this.get('focus') && !device.ios()) {
-            this.$().val(this.$().val()).focus();
-        }
-    },
-
-    _trimValue() {
-        let text = this.$().val();
-        this.$().val(text.trim());
+    init() {
+        this._super(...arguments);
     },
 
     didInsertElement() {
         this._super(...arguments);
-        this._focusField();
+        this._focus();
     },
 
-    focusOut() {
-        this._super(...arguments);
-        this._trimValue();
+    focusOut(event) {
+        this._trimInput(event.target.value);
+    },
+
+    _trimInput(value) {
+        if (value && typeof value.trim === 'function') {
+            value = value.trim();
+        }
+
+        this._processNewValue(value);
+    },
+
+    _focus() {
+        // Until mobile safari has better support
+        // for focusing, we just ignore it
+        if (this.get('shouldFocus') && !device.ios()) {
+            this.element.focus();
+        }
     }
 });
+
+export default TrimFocusInputComponent;

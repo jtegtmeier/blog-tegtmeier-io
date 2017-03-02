@@ -1,15 +1,12 @@
 /* jscs:disable requireCamelCaseOrUpperCaseIdentifiers */
-import Ember from 'ember';
 import Model from 'ember-data/model';
 import attr from 'ember-data/attr';
-import { hasMany } from 'ember-data/relationships';
-import ValidationEngine from 'ghost/mixins/validation-engine';
+import {hasMany} from 'ember-data/relationships';
+import computed, {equal} from 'ember-computed';
+import injectService from 'ember-service/inject';
 
-const {
-    computed,
-    inject: {service}
-} = Ember;
-const {equal, empty} = computed;
+import {task} from 'ember-concurrency';
+import ValidationEngine from 'ghost-admin/mixins/validation-engine';
 
 export default Model.extend(ValidationEngine, {
     validationType: 'user',
@@ -28,21 +25,23 @@ export default Model.extend(ValidationEngine, {
     language: attr('string', {defaultValue: 'en_US'}),
     metaTitle: attr('string'),
     metaDescription: attr('string'),
-    lastLogin: attr('moment-date'),
-    createdAt: attr('moment-date'),
+    lastLoginUTC: attr('moment-utc'),
+    createdAtUTC: attr('moment-utc'),
     createdBy: attr('number'),
-    updatedAt: attr('moment-date'),
+    updatedAtUTC: attr('moment-utc'),
     updatedBy: attr('number'),
     roles: hasMany('role', {
         embedded: 'always',
         async: false
     }),
     count: attr('raw'),
-    facebook: attr('string'),
-    twitter: attr('string'),
+    facebook: attr('facebook-url-user'),
+    twitter: attr('twitter-url-user'),
 
-    ghostPaths: service(),
-    ajax: service(),
+    ghostPaths: injectService(),
+    ajax: injectService(),
+    session: injectService(),
+    notifications: injectService(),
 
     // TODO: Once client-side permissions are in place,
     // remove the hard role check.
@@ -51,7 +50,9 @@ export default Model.extend(ValidationEngine, {
     isAdmin: equal('role.name', 'Administrator'),
     isOwner: equal('role.name', 'Owner'),
 
-    isPasswordValid: empty('passwordValidationErrors.[]'),
+    isLoggedIn: computed('id', 'session.user.id', function () {
+        return this.get('id') === this.get('session.user.id');
+    }),
 
     active: computed('status', function () {
         return ['active', 'warn-1', 'warn-2', 'warn-3', 'warn-4', 'locked'].indexOf(this.get('status')) > -1;
@@ -62,20 +63,6 @@ export default Model.extend(ValidationEngine, {
     }),
 
     pending: equal('status', 'invited-pending'),
-
-    passwordValidationErrors: computed('password', 'newPassword', 'ne2Password', function () {
-        let validationErrors = [];
-
-        if (!validator.equals(this.get('newPassword'), this.get('ne2Password'))) {
-            validationErrors.push({message: 'Your new passwords do not match'});
-        }
-
-        if (!validator.isLength(this.get('newPassword'), 8)) {
-            validationErrors.push({message: 'Your password is not long enough. It must be at least 8 characters long.'});
-        }
-
-        return validationErrors;
-    }),
 
     role: computed('roles', {
         get() {
@@ -90,20 +77,46 @@ export default Model.extend(ValidationEngine, {
         }
     }),
 
-    saveNewPassword() {
-        let url = this.get('ghostPaths.url').api('users', 'password');
+    saveNewPassword: task(function* () {
+        let validation = this.get('isLoggedIn') ? 'ownPasswordChange' : 'passwordChange';
 
-        return this.get('ajax').put(url, {
-            data: {
-                password: [{
-                    user_id: this.get('id'),
-                    oldPassword: this.get('password'),
-                    newPassword: this.get('newPassword'),
-                    ne2Password: this.get('ne2Password')
-                }]
-            }
-        });
-    },
+        try {
+            yield this.validate({property: validation});
+        } catch (e) {
+            // validation error, don't do anything
+            return;
+        }
+
+        try {
+            let url = this.get('ghostPaths.url').api('users', 'password');
+
+            yield this.get('ajax').put(url, {
+                data: {
+                    password: [{
+                        user_id: this.get('id'),
+                        oldPassword: this.get('password'),
+                        newPassword: this.get('newPassword'),
+                        ne2Password: this.get('ne2Password')
+                    }]
+                }
+            });
+
+            this.setProperties({
+                password: '',
+                newPassword: '',
+                ne2Password: ''
+            });
+
+            this.get('notifications').showNotification('Password updated.', {type: 'success', key: 'user.change-password.success'});
+
+            // clear errors manually for ne2password because validation
+            // engine only clears the "validated proeprty"
+            // TODO: clean up once we have a better validations library
+            this.get('errors').remove('ne2Password');
+        } catch (error) {
+            this.get('notifications').showAPIError(error, {key: 'user.change-password'});
+        }
+    }).drop(),
 
     resendInvite() {
         let fullUserData = this.toJSON();

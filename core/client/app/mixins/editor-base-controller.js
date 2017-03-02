@@ -1,16 +1,22 @@
 import Ember from 'ember';
-import PostModel from 'ghost/models/post';
-import boundOneWay from 'ghost/utils/bound-one-way';
+import Mixin from 'ember-metal/mixin';
+import RSVP from 'rsvp';
+import computed, {alias, mapBy} from 'ember-computed';
+import injectService from 'ember-service/inject';
+import injectController from 'ember-controller/inject';
+import {htmlSafe} from 'ember-string';
+import observer from 'ember-metal/observer';
+import run from 'ember-runloop';
+import {isEmberArray} from 'ember-array/utils';
+import {isBlank} from 'ember-utils';
 
-const {
-    Mixin,
-    RSVP: {resolve},
-    computed,
-    inject: {service, controller},
-    observer,
-    run
-} = Ember;
-const {alias} = computed;
+import {task, timeout} from 'ember-concurrency';
+
+import PostModel from 'ghost-admin/models/post';
+import boundOneWay from 'ghost-admin/utils/bound-one-way';
+import {isVersionMismatchError} from 'ghost-admin/services/ajax';
+
+const {resolve} = RSVP;
 
 // this array will hold properties we need to watch
 // to know if the model has been changed (`controller.hasDirtyAttributes`)
@@ -28,8 +34,10 @@ export default Mixin.create({
     showLeaveEditorModal: false,
     showReAuthenticateModal: false,
 
-    postSettingsMenuController: controller('post-settings-menu'),
-    notifications: service(),
+    postSettingsMenuController: injectController('post-settings-menu'),
+    notifications: injectService(),
+    clock: injectService(),
+    slugGenerator: injectService(),
 
     init() {
         this._super(...arguments);
@@ -67,23 +75,61 @@ export default Mixin.create({
      * can the post's status change.
      */
     willPublish: boundOneWay('model.isPublished'),
+    willSchedule: boundOneWay('model.isScheduled'),
+    scheduledWillPublish: boundOneWay('model.isPublished'),
 
     // set by the editor route and `hasDirtyAttributes`. useful when checking
     // whether the number of tags has changed for `hasDirtyAttributes`.
     previousTagNames: null,
 
-    tagNames: computed('model.tags.@each.name', function () {
-        return this.get('model.tags').mapBy('name');
-    }),
+    tagNames: mapBy('model.tags', 'name'),
 
     postOrPage: computed('model.page', function () {
         return this.get('model.page') ? 'Page' : 'Post';
     }),
 
+    // countdown timer to show the time left until publish time for a scheduled post
+    // starts 15 minutes before scheduled time
+    scheduleCountdown: computed('model.status', 'clock.second', 'model.publishedAtUTC', 'model.timeScheduled', function () {
+        let status = this.get('model.status');
+        let publishTime = this.get('model.publishedAtUTC');
+
+        this.get('clock.second');
+
+        if (this.get('model.timeScheduled') && status === 'scheduled' && publishTime.diff(moment.utc(new Date()), 'minutes', true) < 15) {
+            return moment(publishTime).fromNow();
+        } else {
+            return false;
+        }
+    }),
+
+    // statusFreeze has two tasks:
+    // 1. 2 minutes before the scheduled time it will return true to change the button layout in gh-editor-save-button. There will be no
+    //    dropdown menu, the save button gets the status 'isDangerous' to turn red and will only have the option to unschedule the post
+    // 2. when the scheduled time is reached we use a helper 'scheduledWillPublish' to pretend we're already dealing with a published post.
+    //    This will take effect on the save button menu, the workflows and existing conditionals.
+    statusFreeze: computed('model.status', 'clock.second', 'model.publishedAtUTC', 'model.timeScheduled', function () {
+        let status = this.get('model.status');
+        let publishTime = this.get('model.publishedAtUTC');
+
+        this.get('clock.second');
+
+        if (this.get('model.timeScheduled') && status === 'scheduled' && publishTime.diff(moment.utc(new Date()), 'minutes', true) < 2) {
+            return true;
+        } else if (!this.get('model.timeScheduled') && !this.get('scheduledWillPublish') && status === 'scheduled' && publishTime.diff(moment.utc(new Date()), 'hours', true) < 0) {
+            // set the helper to true, until the model refreshed
+            this.set('scheduledWillPublish', true);
+            this.showSaveNotification('scheduled', 'published', false);
+            return false;
+        } else {
+            return false;
+        }
+    }),
+
     // compares previousTagNames to tagNames
     tagNamesEqual() {
-        let tagNames = this.get('tagNames');
-        let previousTagNames = this.get('previousTagNames');
+        let tagNames = this.get('tagNames') || [];
+        let previousTagNames = this.get('previousTagNames') || [];
         let hashCurrent,
             hashPrevious;
 
@@ -197,12 +243,19 @@ export default Mixin.create({
         errors: {
             post: {
                 published: {
-                    published: 'Update failed.',
-                    draft: 'Saving failed.'
+                    published: 'Update failed',
+                    draft: 'Saving failed',
+                    scheduled: 'Scheduling failed'
                 },
                 draft: {
-                    published: 'Publish failed.',
-                    draft: 'Saving failed.'
+                    published: 'Publish failed',
+                    draft: 'Saving failed',
+                    scheduled: 'Scheduling failed'
+                },
+                scheduled: {
+                    scheduled: 'Updated failed',
+                    draft: 'Unscheduling failed',
+                    published: 'Publish failed'
                 }
 
             }
@@ -212,11 +265,18 @@ export default Mixin.create({
             post: {
                 published: {
                     published: 'Updated.',
-                    draft: 'Saved.'
+                    draft: 'Saved.',
+                    scheduled: 'Scheduled.'
                 },
                 draft: {
                     published: 'Published!',
-                    draft: 'Saved.'
+                    draft: 'Saved.',
+                    scheduled: 'Scheduled.'
+                },
+                scheduled: {
+                    scheduled: 'Updated.',
+                    draft: 'Unscheduled.',
+                    published: 'Published!'
                 }
             }
         }
@@ -241,31 +301,72 @@ export default Mixin.create({
         notifications.showNotification(message.htmlSafe(), {delayed: delay});
     },
 
-    showErrorAlert(prevStatus, status, errors, delay) {
+    showErrorAlert(prevStatus, status, error, delay) {
         let message = this.messageMap.errors.post[prevStatus][status];
         let notifications = this.get('notifications');
-        let error;
+        let errorMessage;
 
         function isString(str) {
             /*global toString*/
             return toString.call(str) === '[object String]';
         }
 
-        if (errors && isString(errors)) {
-            error = errors;
-        } else if (errors && errors[0] && isString(errors[0])) {
-            error = errors[0];
-        } else if (errors && errors[0] && errors[0].message && isString(errors[0].message)) {
-            error = errors[0].message;
+        if (error && isString(error)) {
+            errorMessage = error;
+        } else if (error && isEmberArray(error)) {
+            // This is here because validation errors are returned as an array
+            // TODO: remove this once validations are fixed
+            errorMessage = error[0];
+        } else if (error && error.errors && error.errors[0].message) {
+            errorMessage = error.errors[0].message;
         } else {
-            error = 'Unknown Error';
+            errorMessage = 'Unknown Error';
         }
 
-        message += `<br />${error}`;
-        message = Ember.String.htmlSafe(message);
+        message += `: ${errorMessage}`;
+        message = htmlSafe(message);
 
         notifications.showAlert(message, {type: 'error', delayed: delay, key: 'post.save'});
     },
+
+    updateTitle: task(function* (newTitle) {
+        this.set('model.titleScratch', newTitle);
+
+        // if model is not new and title is not '(Untitled)', or model is new and
+        // has a title, don't generate a slug
+        if ((!this.get('model.isNew') || this.get('model.title')) && newTitle !== '(Untitled)') {
+            return;
+        }
+
+        // debounce for 700 milliseconds
+        yield timeout(700);
+
+        yield this.get('generateSlug').perform();
+    }).restartable(),
+
+    generateSlug: task(function* () {
+        let title = this.get('model.titleScratch');
+
+        // Only set an "untitled" slug once per post
+        if (title === '(Untitled)' && this.get('model.slug')) {
+            return;
+        }
+
+        try {
+            let slug = yield this.get('slugGenerator').generateSlug('post', title);
+
+            if (!isBlank(slug)) {
+                this.set('model.slug', slug);
+            }
+        } catch (error) {
+            // Nothing to do (would be nice to log this somewhere though),
+            // but a rejected promise needs to be handled here so that a resolved
+            // promise is returned.
+            if (isVersionMismatchError(error)) {
+                this.get('notifications').showAPIError(error);
+            }
+        }
+    }).enqueue(),
 
     actions: {
         cancelTimers() {
@@ -290,14 +391,22 @@ export default Mixin.create({
             let promise, status;
 
             options = options || {};
-
             this.toggleProperty('submitting');
-
             if (options.backgroundSave) {
                 // do not allow a post's status to be set to published by a background save
                 status = 'draft';
             } else {
-                status = this.get('willPublish') ? 'published' : 'draft';
+                if (this.get('scheduledWillPublish')) {
+                    status = (!this.get('willSchedule') && !this.get('willPublish')) ? 'draft' : 'published';
+                } else {
+                    if (this.get('willPublish') && !this.get('model.isScheduled') && !this.get('statusFreeze')) {
+                        status = 'published';
+                    } else if (this.get('willSchedule') && !this.get('model.isPublished') && !this.get('statusFreeze')) {
+                        status = 'scheduled';
+                    } else {
+                        status = 'draft';
+                    }
+                }
             }
 
             this.send('cancelTimers');
@@ -317,26 +426,39 @@ export default Mixin.create({
             this.set('model.metaDescription', psmController.get('metaDescriptionScratch'));
 
             if (!this.get('model.slug')) {
-                // Cancel any pending slug generation that may still be queued in the
-                // run loop because we need to run it before the post is saved.
-                run.cancel(psmController.get('debounceId'));
+                this.get('updateTitle').cancelAll();
 
-                psmController.generateAndSetSlug('model.slug');
+                promise = this.get('generateSlug').perform();
             }
 
-            promise = resolve(psmController.get('lastPromise')).then(() => {
+            return resolve(promise).then(() => {
                 return this.get('model').save(options).then((model) => {
                     if (!options.silent) {
                         this.showSaveNotification(prevStatus, model.get('status'), isNew ? true : false);
                     }
 
                     this.toggleProperty('submitting');
+
+                    // reset the helper CP back to false after saving and refetching the new model
+                    // which is published by the scheduler process on the server now
+                    if (this.get('scheduledWillPublish')) {
+                        this.set('scheduledWillPublish', false);
+                    }
                     return model;
                 });
-            }).catch((errors) => {
+            }).catch((error) => {
+                // re-throw if we have a general server error
+                // TODO: use isValidationError(error) once we have
+                // ember-ajax/ember-data integration
+                if (error && error.errors && error.errors[0].errorType !== 'ValidationError') {
+                    this.toggleProperty('submitting');
+                    this.send('error', error);
+                    return;
+                }
+
                 if (!options.silent) {
-                    errors = errors || this.get('model.errors.messages');
-                    this.showErrorAlert(prevStatus, this.get('model.status'), errors);
+                    error = error || this.get('model.errors.messages');
+                    this.showErrorAlert(prevStatus, this.get('model.status'), error);
                 }
 
                 this.set('model.status', prevStatus);
@@ -344,16 +466,17 @@ export default Mixin.create({
                 this.toggleProperty('submitting');
                 return this.get('model');
             });
-
-            psmController.set('lastPromise', promise);
-
-            return promise;
         },
 
         setSaveType(newType) {
             if (newType === 'publish') {
                 this.set('willPublish', true);
+                this.set('willSchedule', false);
             } else if (newType === 'draft') {
+                this.set('willPublish', false);
+                this.set('willSchedule', false);
+            } else if (newType === 'schedule') {
+                this.set('willSchedule', true);
                 this.set('willPublish', false);
             }
         },

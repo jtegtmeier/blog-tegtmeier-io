@@ -1,18 +1,15 @@
-import Ember from 'ember';
-import ghostPaths from 'ghost/utils/ghost-paths';
-import documentTitle from 'ghost/utils/document-title';
+import Router from 'ember-router';
+import injectService from 'ember-service/inject';
+import on from 'ember-evented/on';
+import ghostPaths from 'ghost-admin/utils/ghost-paths';
+import documentTitle from 'ghost-admin/utils/document-title';
 import config from './config/environment';
 
-const {
-    inject: {service},
-    on
-} = Ember;
-
-const Router = Ember.Router.extend({
+const GhostRouter = Router.extend({
     location: config.locationType, // use HTML5 History API instead of hash-tag based URLs
     rootURL: ghostPaths().adminRoot, // admin interface lives under sub-directory /ghost
 
-    notifications: service(),
+    notifications: injectService(),
 
     displayDelayedNotifications: on('didTransition', function () {
         this.get('notifications').displayDelayed();
@@ -21,7 +18,7 @@ const Router = Ember.Router.extend({
 
 documentTitle();
 
-Router.map(function () {
+GhostRouter.map(function () {
     this.route('setup', function () {
         this.route('one');
         this.route('two');
@@ -47,7 +44,9 @@ Router.map(function () {
         this.route('user', {path: ':user_slug'});
     });
 
-    this.route('settings.general', {path: '/settings/general'});
+    this.route('settings.general', {path: '/settings/general'}, function () {
+        this.route('uploadtheme');
+    });
     this.route('settings.tags', {path: '/settings/tags'}, function () {
         this.route('tag', {path: ':tag_slug'});
         this.route('new');
@@ -57,9 +56,10 @@ Router.map(function () {
     this.route('settings.navigation', {path: '/settings/navigation'});
     this.route('settings.apps', {path: '/settings/apps'}, function () {
         this.route('slack', {path: 'slack'});
+        this.route('amp', {path: 'amp'});
     });
 
-    this.route('subscribers', function() {
+    this.route('subscribers', function () {
         this.route('new');
         this.route('import');
     });
@@ -67,4 +67,4 @@ Router.map(function () {
     this.route('error404', {path: '/*path'});
 });
 
-export default Router;
+export default GhostRouter;

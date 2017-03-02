@@ -1,15 +1,17 @@
-import Ember from 'ember';
+import {helper} from 'ember-helper';
+import {htmlSafe} from 'ember-string';
 
-const {Helper} = Ember;
-
-export default Helper.helper(function (params) {
+export function countCharacters(params) {
     if (!params || !params.length) {
         return;
     }
 
     let el = document.createElement('span');
     let content = params[0] || '';
-    let {length} = content;
+
+    // convert to array so that we get accurate symbol counts for multibyte chars
+    // this will still count emoji+modifer as two chars
+    let {length} = Array.from(content);
 
     el.className = 'word-count';
 
@@ -21,5 +23,9 @@ export default Helper.helper(function (params) {
 
     el.innerHTML = 200 - length;
 
-    return Ember.String.htmlSafe(el.outerHTML);
+    return htmlSafe(el.outerHTML);
+}
+
+export default helper(function (params) {
+    return countCharacters(params);
 });

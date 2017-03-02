@@ -1,7 +1,7 @@
 /* global key */
-import Ember from 'ember';
-
-const {Mixin, run, typeOf} = Ember;
+import Mixin from 'ember-metal/mixin';
+import run from 'ember-runloop';
+import {typeOf} from 'ember-utils';
 
 // Configure KeyMaster to respond to all shortcuts,
 // even inside of
@@ -23,8 +23,7 @@ key.setScope('default');
  *
  * ```javascript
  * shortcuts: {
- *     'ctrl+s, command+s': 'save',
- *     'ctrl+alt+z': 'toggleZenMode'
+ *     'ctrl+s, command+s': 'save'
  * }
  * ```
  * For more complex actions, shortcuts can instead have their value

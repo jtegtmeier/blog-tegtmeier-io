@@ -6,13 +6,15 @@ import {
     afterEach
 } from 'mocha';
 import { expect } from 'chai';
-import Ember from 'ember';
+import $ from 'jquery';
+import run from 'ember-runloop';
 import startApp from '../helpers/start-app';
 import destroyApp from '../helpers/destroy-app';
-import { authenticateSession, currentSession, invalidateSession } from 'ghost/tests/helpers/ember-simple-auth';
+import { authenticateSession, currentSession, invalidateSession } from 'ghost-admin/tests/helpers/ember-simple-auth';
 import Mirage from 'ember-cli-mirage';
-import windowProxy from 'ghost/utils/window-proxy';
-import ghostPaths from 'ghost/utils/ghost-paths';
+import windowProxy from 'ghost-admin/utils/window-proxy';
+import ghostPaths from 'ghost-admin/utils/ghost-paths';
+import OAuth2Authenticator from 'ghost-admin/authenticators/oauth2';
 
 const Ghost = ghostPaths();
 
@@ -26,6 +28,40 @@ describe('Acceptance: Authentication', function () {
 
     afterEach(function () {
         destroyApp(application);
+    });
+
+    describe('token handling', function () {
+        beforeEach(function () {
+            // replace the default test authenticator with our own authenticator
+            application.register('authenticator:test', OAuth2Authenticator);
+
+            let role = server.create('role', {name: 'Administrator'});
+            server.create('user', {roles: [role], slug: 'test-user'});
+        });
+
+        it('refreshes app tokens on boot', function () {
+            /* jscs:disable requireCamelCaseOrUpperCaseIdentifiers */
+            authenticateSession(application, {
+                access_token: 'testAccessToken',
+                refresh_token: 'refreshAccessToken'
+            });
+
+            visit('/');
+
+            andThen(() => {
+                let requests = server.pretender.handledRequests;
+                let refreshRequest = requests.findBy('url', '/ghost/api/v0.1/authentication/token');
+
+                expect(refreshRequest).to.exist;
+                expect(refreshRequest.method, 'method').to.equal('POST');
+
+                let requestBody = $.deparam(refreshRequest.requestBody);
+                expect(requestBody.grant_type, 'grant_type').to.equal('password');
+                expect(requestBody.username.access_token, 'access_token').to.equal('testAccessToken');
+                expect(requestBody.username.refresh_token, 'refresh_token').to.equal('refreshAccessToken');
+            });
+            /* jscs:enable requireCamelCaseOrUpperCaseIdentifiers */
+        });
     });
 
     describe('general page', function () {
@@ -94,13 +130,13 @@ describe('Acceptance: Authentication', function () {
     });
 
     describe('editor', function () {
-        let origDebounce = Ember.run.debounce;
-        let origThrottle = Ember.run.throttle;
+        let origDebounce = run.debounce;
+        let origThrottle = run.throttle;
 
         // we don't want the autosave interfering in this test
         beforeEach(function () {
-            Ember.run.debounce = function () { };
-            Ember.run.throttle = function () { };
+            run.debounce = function () { };
+            run.throttle = function () { };
         });
 
         it('displays re-auth modal attempting to save with invalid session', function () {
@@ -154,8 +190,8 @@ describe('Acceptance: Authentication', function () {
 
         // don't clobber debounce/throttle for future tests
         afterEach(function () {
-            Ember.run.debounce = origDebounce;
-            Ember.run.throttle = origThrottle;
+            run.debounce = origDebounce;
+            run.throttle = origThrottle;
         });
     });
 

@@ -1,6 +1,4 @@
-import Ember from 'ember';
-
-const {Mixin} = Ember;
+import Mixin from 'ember-metal/mixin';
 
 export default Mixin.create({
     submitting: false,
@@ -9,7 +7,7 @@ export default Mixin.create({
         save() {
             this.set('submitting', true);
 
-            this.save().then(() => {
+            this.save().finally(() => {
                 this.set('submitting', false);
             });
         }

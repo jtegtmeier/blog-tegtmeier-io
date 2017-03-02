@@ -4,10 +4,8 @@ import {
     describeComponent,
     it
 } from 'ember-mocha';
-import Ember from 'ember';
-
-const {run} = Ember;
-const emberA = Ember.A;
+import {A as emberA} from 'ember-array/utils';
+import run from 'ember-runloop';
 
 describeComponent(
     'gh-selectize',
@@ -33,8 +31,8 @@ describeComponent(
                 component._selectize.setValue(['item 3', 'item 2']);
             });
 
-            expect(component.get('value'), 'component value').to.deep.equal(['item 3', 'item 2']);
-            expect(component.get('selection'), 'component selection').to.deep.equal(['item 3', 'item 2']);
+            expect(component.get('value').toArray(), 'component value').to.deep.equal(['item 3', 'item 2']);
+            expect(component.get('selection').toArray(), 'component selection').to.deep.equal(['item 3', 'item 2']);
         });
     }
 );
